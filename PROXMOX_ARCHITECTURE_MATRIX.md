@@ -26,3 +26,10 @@
 * Internal OS Volume (`scsi0`): 100GB thin-provisioned allocation backed by the host ZFS pool. Native guest TRIM optimization enabled (`discard=on`) to automatically reclaim dead sectors.
 * Data Storage Volume (`usb0`): Physical 2TB external USB SSD (SSK Storage, `0bda:9210`) passed completely through to the VM layout.
 * Data Strategy (Path A): Drive was cleanly formatted and initialized using native StartOS LUKS storage encryption layers. A pristine, uncorrupted blockchain ledger synchronization process has been successfully initiated inside the guest sandbox container network.
+
+## 4. ACTIVE GUEST RUNTIME ARCHITECTURE: LXC 200 (wireguard-vpn)
+* Guest Environment: WireGuard VPN container (Phase 3 Complete).
+* Network Layer: Static IP `192.168.0.11/24` (Gateway: `192.168.0.1`).
+* Cryptographic Routing: Interface `wg0` active. Tunnel port set to UDP `51820`.
+* UI Management: WGDashboard active at `http://192.168.0.11:10086`.
+* Further Details: See `containers/wireguard_vpn_200.md` for extended configuration information and external ingress status.
