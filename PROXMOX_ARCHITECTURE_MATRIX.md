@@ -32,4 +32,5 @@
 * Network Layer: Static IP `192.168.0.11/24` (Gateway: `192.168.0.1`).
 * Cryptographic Routing: Interface `wg0` active. Tunnel port set to UDP `51820`.
 * UI Management: WGDashboard active at `http://192.168.0.11:10086`.
+* Telemetry Note: Proxmox LXC metrics do not reflect kernel-space WireGuard encryption; refer to main node metrics for true CPU load.
 * Further Details: See `containers/wireguard_vpn_200.md` for extended configuration information and external ingress status.

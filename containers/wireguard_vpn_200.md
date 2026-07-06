@@ -1,7 +1,7 @@
 # WireGuard VPN (LXC 200)
 
 ## Overview
-* **Status**: Deployed and operational (Phase 3 Complete)
+* **Status**: Deployed, stress-tested, and fully operational (Phase 3 Complete)
 * **Purpose**: VPN Ingress for remote administration and secure access.
 
 ## Container Properties
@@ -15,7 +15,7 @@
 * **Cryptographic Routing**:
     * **Interface**: `wg0` active
     * **Tunnel Port**: UDP `51820`
-* **External Ingress**: Awaiting edge router NAT rule (UDP `51820` -> `192.168.0.11`) to finalize remote handshake capabilities.
+* **External Ingress**: Endpoint active at `thetdy.synology.me:51820` (UDP). Sustained 4K 60fps remote stream successful. Host limits: 14-Core Intel i9 processing pool confirmed sufficient for heavy cryptographic tunneling.
 
 ## Management Interface
 * **UI Management**: WGDashboard active at `http://192.168.0.11:10086`
