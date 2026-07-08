@@ -13,7 +13,7 @@
 
 ## Network Configuration
 
-* **Static IP**: `192.168.0.11/24`
+* **Static IP**: `192.168.0.11/24` (Accessible via `https://192.168.0.11`)
 * **Gateway**: `192.168.0.1`
 * **Cryptographic Routing**:
   * **Interface**: `wg0` active
