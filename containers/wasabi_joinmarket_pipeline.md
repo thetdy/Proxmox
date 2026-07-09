@@ -50,7 +50,12 @@ Follow these steps to deploy JoinMarket:
    wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz
    tar -xzf Wasabi-2.8.0-linux-x64.tar.gz
    ```
-2. Generate a `systemd` service file to manage the daemon's uptime:
+2. Create an unprivileged user for the daemon and set ownership of the binary:
+   ```bash
+   sudo useradd -r -s /bin/false wasabi
+   sudo chown -R wasabi:wasabi WalletWasabi-2.8.0 # Adjust path to the extracted directory
+   ```
+3. Generate a `systemd` service file to manage the daemon's uptime:
    Create a file `/etc/systemd/system/wassabeed.service`:
    ```ini
    [Unit]
@@ -60,7 +65,8 @@ Follow these steps to deploy JoinMarket:
    [Service]
    ExecStart=/path/to/wassabeed --wallet=<WALLET_NAME> --jsonrpcserverenabled=true
    Restart=always
-   User=root
+   User=wasabi
+   Group=wasabi
 
    [Install]
    WantedBy=multi-user.target
@@ -70,7 +76,7 @@ Follow these steps to deploy JoinMarket:
    sudo systemctl enable wassabeed
    sudo systemctl start wassabeed
    ```
-3. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
+4. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
 
 ## 5. Execution Wrappers
 Lightweight, executable shell scripts to wrap manual commands.
