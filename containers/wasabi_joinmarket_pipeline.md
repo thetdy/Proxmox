@@ -38,10 +38,11 @@ Follow these steps to deploy JoinMarket:
    The following `sed` script modifies `~/.joinmarket/joinmarket.cfg` to point to the StartOS Knots local IP, setting `rpc_port = 8332`, and inserting placeholders for `rpc_user` and `rpc_password`.
 
    ```bash
-   sed -i '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_host = .*/rpc_host = <STARTOS_IP>/' ~/.joinmarket/joinmarket.cfg
-   sed -i '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_port = .*/rpc_port = 8332/' ~/.joinmarket/joinmarket.cfg
-   sed -i '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_user = .*/rpc_user = <RPC_USER>/' ~/.joinmarket/joinmarket.cfg
-   sed -i '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_password = .*/rpc_password = <RPC_PASSWORD>/' ~/.joinmarket/joinmarket.cfg
+   sed -i -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_host = .*/rpc_host = <STARTOS_IP>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_port = .*/rpc_port = 8332/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_user = .*/rpc_user = <RPC_USER>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_password = .*/rpc_password = <RPC_PASSWORD>/' \
+          ~/.joinmarket/joinmarket.cfg
    ```
 
 ## 4. Component B: Wasabi Deployment
