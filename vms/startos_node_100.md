@@ -8,7 +8,7 @@
 ## Architecture & Network Privacy (Hybrid Model)
 
 * **Primary Goal Achieved**: 100% clearnet IP masking. Zero ports forwarded on the home router.
-* **Internal Access**: High-speed LAN/mDNS addresses configured for local wallet connections.
+* **Internal Access**: High-speed LAN/mDNS addresses configured for local wallet connections. Static IP: `https://192.168.0.12`.
 * **Remote Access**: Dedicated Tor `.onion` services generated for secure, encrypted external tunneling to the stack.
 * **Clearnet Leaks Plugged**: NAT-PMP explicitly disabled in Bitcoin Knots to prevent automated router port-forwarding backdoors.
 

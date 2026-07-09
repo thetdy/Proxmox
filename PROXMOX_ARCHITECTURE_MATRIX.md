@@ -13,7 +13,7 @@
 
 ## 2. SYSTEM-LEVEL HARDENING POLICIES
 
-* Management Network Layer: Hardcoded static footprint (`192.168.0.10/24`) bound directly to physical port `enp2s0` (permanently pinned as internal hardware target `nic0` via Proxmox 9 predictable hardware mapping).
+* Management Network Layer: Hardcoded static footprint (`192.168.0.10/24`) bound directly to physical port `enp2s0` (permanently pinned as internal hardware target `nic0` via Proxmox 9 predictable hardware mapping). Accessible via `https://192.168.0.10`.
 * IP Conflict Prevention: Router-level DHCP reservation remains active for MAC `58:47:ca:7d:b9:bf` to form a hybrid static reservation boundary.
 * CLI Security Profile: Host SSH daemon updated to completely disable password entry fields (`PasswordAuthentication no`). Authentication is strictly limited to cryptographic Ed25519 public key verification signatures.
 * Web UI Security Profile: Data-center level authentication hardened via root-account Time-Based One-Time Password (TOTP) 2FA.
@@ -21,7 +21,7 @@
 ## 3. ACTIVE GUEST RUNTIME ARCHITECTURE: VM 100 (startos-node)
 
 * Guest OS: StartOS x86_64 architecture (Native self-custody environment).
-* Local Identity Matrix: Permanently accessible via local network domain `http://leather-icepack.local`.
+* Local Identity Matrix: Permanently accessible via local network domain `http://leather-icepack.local` and static IP `https://192.168.0.12`.
 * Workstation Trust Layer: StartOS local Root Certificate Authority (Root CA) manually integrated into the Firefox NSS Certificate Database on Pop!_OS. This enforces valid local TLS end-to-end encryption across all configuration paths.
 
 ### Provisioned Virtual Hardware Footprint
@@ -37,7 +37,7 @@
 ## 4. ACTIVE GUEST RUNTIME ARCHITECTURE: LXC 200 (wireguard-vpn)
 
 * Guest Environment: WireGuard VPN container (Phase 3 Complete).
-* Network Layer: Static IP `192.168.0.11/24` (Gateway: `192.168.0.1`).
+* Network Layer: Static IP `192.168.0.11/24` (Gateway: `192.168.0.1`). Accessible via `https://192.168.0.11`.
 * Cryptographic Routing: Interface `wg0` active. Tunnel port set to UDP `51820`.
 * UI Management: WGDashboard active at `http://192.168.0.11:10086`.
 * Telemetry Note: Proxmox LXC metrics do not reflect kernel-space WireGuard encryption; refer to main node metrics for true CPU load.
