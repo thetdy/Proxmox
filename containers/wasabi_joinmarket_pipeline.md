@@ -15,7 +15,7 @@ Provisioning script to install the prerequisites before pulling repositories:
 ```bash
 #!/bin/bash
 sudo apt-get update
-sudo apt-get install -y python3-dev python3-pip python3-venv git build-essential automake pkg-config libtool libffi-dev libssl-dev tor jq wget
+sudo apt-get install -y python3-dev python3-pip python3-venv git build-essential automake pkg-config libtool libffi-dev libssl-dev tor jq wget gnupg
 ```
 
 ## 3. Component A: JoinMarket Deployment
@@ -59,7 +59,17 @@ Follow these steps to deploy JoinMarket:
 1. Pull the latest Linux standalone binary for `wassabeed`:
 
    ```bash
+   # Download binary and PGP signature
    wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz
+   wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz.asc
+
+   # Verify SHA256 checksum
+   echo "fd1053949660e20c280fe79e8d6b43e9149694b712247d1ae3ac3b7486616ec0  Wasabi-2.8.0-linux-x64.tar.gz" | sha256sum -c -
+
+   # Verify PGP Signature (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
+   wget -qO- https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt | gpg --import
+   gpg --verify Wasabi-2.8.0-linux-x64.tar.gz.asc Wasabi-2.8.0-linux-x64.tar.gz
+
    tar -xzf Wasabi-2.8.0-linux-x64.tar.gz
    ```
 2. Create an unprivileged user for the daemon and set ownership of the binary:
