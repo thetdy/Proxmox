@@ -54,7 +54,11 @@ Follow these steps to deploy JoinMarket:
           ~/.joinmarket/joinmarket.cfg
    ```
 
-## 4. Component B: Wasabi Deployment
+## 4. Component B: Wasabi Deployment & Configuration
+
+### 4.1 Cryptographic Verification & Extraction
+
+To ensure a completely pristine environment free of orphaned files, execute a clean installation and mathematically verify the binaries against the official developer keys.
 
 1. Pull the latest Linux standalone binary for `wassabeed`:
 
@@ -66,19 +70,56 @@ Follow these steps to deploy JoinMarket:
    # Verify SHA256 checksum
    echo "fd1053949660e20c280fe79e8d6b43e9149694b712247d1ae3ac3b7486616ec0  Wasabi-2.8.0-linux-x64.tar.gz" | sha256sum -c -
 
-   # Verify PGP Signature (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
+   # The Key Import: Pull the official zkSNACKs PGP public key directly into the root Linux keyring.
+   # (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
    wget -qO- https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt | gpg --import
+
+   # The Signature Match & Verification:
+   # Run the `gpg --verify` command against the two files to achieve the `Good signature from "zkSNACKs"` output, proving the archive was untampered with.
    gpg --verify Wasabi-2.8.0-linux-x64.tar.gz.asc Wasabi-2.8.0-linux-x64.tar.gz
 
    tar -xzf Wasabi-2.8.0-linux-x64.tar.gz
    ```
-2. Create an unprivileged user for the daemon and set ownership of the binary:
+
+### 4.2 Bypassing the StartOS SSL & Tor Network Blocks
+
+Connecting an external daemon to StartOS requires navigating two distinct security walls: StartOS uses self-signed SSL certificates for its local network proxy (which Wasabi's `.NET` core rejects), and Wasabi inherently forces traffic through Tor (which drops local `192.168.x.x` IP addresses).
+
+- **The Solution:** Bypass the local network and route the connection directly to the node's Tor interface (`.onion` address) on the standard RPC port `8332`.
+- **Why it works:** Tor natively provides the end-to-end encryption Wasabi demands (eliminating the SSL certificate conflict) while seamlessly satisfying Wasabi's strict Tor proxy routing rules.
+
+### 4.3 Minting RPC Credentials
+
+StartOS actively strips standard `rpcuser` and `rpcpassword` lines from its configuration files to prevent local brute-force attacks.
+
+- Instead of using the main server password, navigate to the **StartOS Dashboard -> Bitcoin Knots -> Actions** menu.
+- Execute the **Generate RPC User Credentials** action to mathematically mint a dedicated, randomized password exclusively for Wasabi's use.
+
+### 4.4 Injecting the Configuration Parameters
+
+Modern Wasabi architecture relies entirely on direct JSON-RPC connections rather than legacy P2P endpoints.
+
+- **Clearing the Markdown Bug:** We encountered `.NET` daemon crashes due to hidden rich-text markdown formatting (`//[https://...]`) carrying over from the clipboard into the terminal editor. Bypass this by manually typing the strings or using direct `sed` commands to programmatically inject the clean text.
+- **The Final Parameters:** Populate `Config.json` with the `.onion` endpoint (formatted as standard `http://` since Tor natively handles the encryption) and the newly minted RPC credentials.
+- **The Cache Flush:** Wipe the `~/.walletwasabi/client/IndexStore/` directory before the final boot to ensure Wasabi doesn't fall back on dirty block filters previously fetched from public nodes.
+
+### 4.5 Validating Node Sovereignty
+
+- **The Mempool Fallbacks:** The `Config.json` defaults point the exchange rate, fee estimation, and external broadcaster to Mempool.space. Wasabi queries Mempool.space strictly over Tor for fiat exchange rates (which the local node cannot provide) and uses it only as an emergency broadcast fallback.
+- **The Proof:** Confirm the terminal output (`Fetched fee rate from RPC node...`) mathematically proves the daemon successfully bypassed the fallback and is routing primary transaction data strictly through the sovereign local node.
+
+### 4.6 Deploying the Background Service
+
+Because launching the daemon in the foreground causes it to crash the moment the terminal is closed (via the `Ctrl+C` interrupt signal), wrap the program in a permanent system daemon.
+
+1. Create an unprivileged user for the daemon and set ownership of the binary:
+
    ```bash
    sudo useradd -r -s /bin/false wasabi
    sudo chown -R wasabi:wasabi WalletWasabi-2.8.0 # Adjust path to the extracted directory
    ```
-3. Generate a `systemd` service file to manage the daemon's uptime:
-   Create a file `/etc/systemd/system/wassabeed.service`:
+
+2. Create a standard `systemd` file at `/etc/systemd/system/wasabi.service` to manage the daemon's uptime:
 
    ```ini
    [Unit]
@@ -95,13 +136,20 @@ Follow these steps to deploy JoinMarket:
    WantedBy=multi-user.target
    ```
 
-   *Enable and start the service:*
+   *Enable and start the service to lock the daemon into the Proxmox startup sequence:*
 
    ```bash
-   sudo systemctl enable wassabeed
-   sudo systemctl start wassabeed
+   sudo systemctl enable wasabi
+   sudo systemctl start wasabi
    ```
-4. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
+
+3. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
+
+### 4.7 Video Resource
+
+[Wasabi Wallet Setup and Synchronization Guide](https://www.youtube.com/watch?v=tKwGkR3EcJY)
+
+This tutorial provides a clear visual walkthrough of the wallet installation and initial setup steps, which is extremely helpful when verifying that your backend configurations are synchronizing correctly with the front-end interface.
 
 ## 5. Execution Wrappers
 
