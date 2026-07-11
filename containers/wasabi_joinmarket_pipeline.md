@@ -1,6 +1,7 @@
 # Wasabi & JoinMarket Pipeline Architecture & Setup
 
 ## 1. Target Architecture
+
 - **Hypervisor:** Proxmox VE
 - **Environment:** Debian 12 Standard LXC (1 Core, 1GB RAM minimum)
 - **Network Interface:** Bridged (`vmbr0`) to the local subnet.
@@ -8,50 +9,77 @@
 - **Primary Goal:** Automate a deployment that runs a headless Wasabi daemon (`wassabeed`) and the JoinMarket CLI in parallel to act as a localized, fully automated CoinJoin-to-Lightning liquidity pipeline.
 
 ## 2. System Dependencies
+
 Provisioning script to install the prerequisites before pulling repositories:
 
 ```bash
 #!/bin/bash
 sudo apt-get update
-sudo apt-get install -y python3-dev python3-pip python3-venv git build-essential automake pkg-config libtool libffi-dev libssl-dev tor jq wget libsodium-dev
+sudo apt-get install -y python3-dev python3-pip python3-venv git build-essential automake pkg-config libtool libffi-dev libssl-dev tor jq wget gnupg
 ```
 
-## 3. Component A: JoinMarket-NG Deployment
-Follow these steps to deploy the modern JoinMarket-NG client:
+## 3. Component A: JoinMarket Deployment
+
+Follow these steps to deploy JoinMarket:
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/JoinMarket-NG/joinmarket-ng.git
-   cd joinmarket-ng
-   ```
-2. Execute the installation (accepting default Tor configurations):
-   ```bash
-   ./install.sh -y
-   ```
-3. Generate the default `config.toml` (if not already created by the installer):
-   ```bash
-   source ~/.joinmarket-ng/activate.sh
-   jm-wallet generate --save --prompt-password --output ~/.joinmarket-ng/wallets/wallet.mnemonic
-   ```
-4. Configuration Patching:
-   The installer automatically sets up Tor and places `config.toml` in `~/.joinmarket-ng/config.toml`.
-   The following `sed` commands automate the modification to point to the StartOS Knots local IP, setting `rpc_port = 8332`, and inserting placeholders for `rpc_user` and `rpc_password` under the `[bitcoin]` block.
 
    ```bash
-   sed -i 's/^rpc_host = .*/rpc_host = "<STARTOS_IP>"/' ~/.joinmarket-ng/config.toml
-   sed -i 's/^rpc_port = .*/rpc_port = 8332/' ~/.joinmarket-ng/config.toml
-   sed -i 's/^rpc_user = .*/rpc_user = "<RPC_USER>"/' ~/.joinmarket-ng/config.toml
-   sed -i 's/^rpc_password = .*/rpc_password = "<RPC_PASSWORD>"/' ~/.joinmarket-ng/config.toml
+   git clone https://github.com/JoinMarket-Org/joinmarket-clientserver.git
+   cd joinmarket-clientserver
+   ```
+
+2. Execute the headless installation:
+
+   ```bash
+   ./install.sh --without-qt
+   ```
+
+3. Generate the default `joinmarket.cfg`:
+
+   ```bash
+   source jmvenv/bin/activate
+   cd scripts
+   python wallet-tool.py generate
+   ```
+
+4. Configuration Patching:
+   The following `sed` script modifies `~/.joinmarket/joinmarket.cfg` to point to the StartOS Knots local IP, setting `rpc_port = 8332`, and inserting placeholders for `rpc_user` and `rpc_password`.
+
+   ```bash
+   sed -i -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_host = .*/rpc_host = <STARTOS_IP>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_port = .*/rpc_port = 8332/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_user = .*/rpc_user = <RPC_USER>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_password = .*/rpc_password = <RPC_PASSWORD>/' \
+          ~/.joinmarket/joinmarket.cfg
    ```
 
 ## 4. Component B: Wasabi Deployment
+
 1. Pull the latest Linux standalone binary for `wassabeed`:
+
    ```bash
+   # Download binary and PGP signature
    wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz
+   wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz.asc
+
+   # Verify SHA256 checksum
+   echo "fd1053949660e20c280fe79e8d6b43e9149694b712247d1ae3ac3b7486616ec0  Wasabi-2.8.0-linux-x64.tar.gz" | sha256sum -c -
+
+   # Verify PGP Signature (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
+   wget -qO- https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt | gpg --import
+   gpg --verify Wasabi-2.8.0-linux-x64.tar.gz.asc Wasabi-2.8.0-linux-x64.tar.gz
+
    tar -xzf Wasabi-2.8.0-linux-x64.tar.gz
    ```
-2. Generate a `systemd` service file to manage the daemon's uptime:
+2. Create an unprivileged user for the daemon and set ownership of the binary:
+   ```bash
+   sudo useradd -r -s /bin/false wasabi
+   sudo chown -R wasabi:wasabi WalletWasabi-2.8.0 # Adjust path to the extracted directory
+   ```
+3. Generate a `systemd` service file to manage the daemon's uptime:
    Create a file `/etc/systemd/system/wassabeed.service`:
+
    ```ini
    [Unit]
    Description=Wasabi Daemon
@@ -60,47 +88,65 @@ Follow these steps to deploy the modern JoinMarket-NG client:
    [Service]
    ExecStart=/path/to/wassabeed --wallet=<WALLET_NAME> --jsonrpcserverenabled=true
    Restart=always
-   User=root
+   User=wasabi
+   Group=wasabi
 
    [Install]
    WantedBy=multi-user.target
    ```
+
    *Enable and start the service:*
+
    ```bash
    sudo systemctl enable wassabeed
    sudo systemctl start wassabeed
    ```
-3. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
+4. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
 
 ## 5. Execution Wrappers
+
 Lightweight, executable shell scripts to wrap manual commands.
 
-- **Wasabi Status (RPC) (`check_balance.sh`):**
+- **Wasabi RPC Wrapper (`wasabi_rpc.sh`):**
+
   ```bash
   #!/bin/bash
-  curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"getwalletinfo"}' http://127.0.0.1:37128/<WALLET_NAME> | jq
+  METHOD=$1
+  PARAMS=${2:-"[]"}
+  curl -s --data-binary "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"$METHOD\", \"params\":$PARAMS}" http://127.0.0.1:37128/<WALLET_NAME> | jq
+  ```
+
+- **Wasabi Status (RPC) (`check_balance.sh`):**
+
+  ```bash
+  #!/bin/bash
+  ./wasabi_rpc.sh getwalletinfo
   ```
 
 - **Wasabi Receive Address (RPC) (`get_address.sh`):**
+
   ```bash
   #!/bin/bash
-  curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"getnewaddress", "params":["<LABEL>"]}' http://127.0.0.1:37128/<WALLET_NAME> | jq
+  ./wasabi_rpc.sh getnewaddress "[\"<LABEL>\"]"
   ```
 
-- **JoinMarket-NG Extract Zpub (`jm_extract_zpub.sh`):**
+- **JoinMarket Extract Jar 0 Zpub (`jm_extract_zpub.sh`):**
+
   ```bash
   #!/bin/bash
-  # Run this within the joinmarket-ng venv environment
-  jm-wallet xpub -m 0 ~/.joinmarket-ng/wallets/wallet.mnemonic
+  # Run this within the jmvenv environment and scripts directory
+  python wallet-tool.py -m 0 wallet.jmdat
   ```
 
-- **JoinMarket-NG Taker Sweep (To Lightning On-Chain) (`sweep_to_lightning.sh`):**
+- **JoinMarket Taker Sweep (To Lightning On-Chain) (`sweep_to_lightning.sh`):**
+
   ```bash
   #!/bin/bash
-  # Run this within the joinmarket-ng venv environment
-  jm-taker send -f ~/.joinmarket-ng/wallets/wallet.mnemonic --mixdepth 0 --amount 0 --makers 5 --destination <DESTINATION_ADDRESS>
+  # Run this within the jmvenv environment and scripts directory
+  python sendpayment.py -N 5 -m 0 wallet.jmdat 0 <DESTINATION_ADDRESS>
   ```
 
 ## 6. Strict Networking Constraints
-- **No nested Tor.** JoinMarket-NG configures Tor dynamically and defaults to Tor control port `9051`. Wasabi natively builds its own circuits. Do not configure system-wide transparent Tor proxying.
+
+- **No nested Tor.** JoinMarket relies on the system Tor daemon (`9050`). Wasabi natively builds its own circuits. Do not configure system-wide transparent Tor proxying.
 - The LXC must have direct LAN access to the StartOS IP to hit the Knots RPC without routing through external VPNs.
