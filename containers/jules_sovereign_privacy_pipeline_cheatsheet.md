@@ -73,3 +73,64 @@ To prevent database conflicts and privacy leaks on a shared seed, follow this st
 4. **Stop Wasabi:** Stop the mixing daemon entirely.
 5. **Engage JoinMarket:** Launch the Yield Generator to earn routing fees on the
 mixed UTXOs in Jar 0, OR sweep them directly to your Lightning Node.
+
+---
+
+## 5. Critical File Locations
+
+* **Systemd Service File:** `/etc/systemd/system/wasabi.service`
+* **Global Engine Configuration:** `/root/.walletwasabi/client/Config.json`
+* **Hot Wallet Config:** `/root/.walletwasabi/client/Wallets/Wasabi.json`
+* **Cold Destination Config:** `/root/.walletwasabi/client/Wallets/JoinMarket.json`
+
+---
+
+## 6. Configuration Changes & States
+
+* **Systemd Auto-Mounting:** Modified the `ExecStart` line in `wasabi.service` to auto-load both wallets into active memory on boot. The line now reads:
+  `ExecStart=/opt/wasabi/WasabiWallet/wassabeed --jsonrpcserverenabled=true --wallet=Wasabi --wallet=JoinMarket`
+* **Target Anonymity Score (`AnonScoreTarget`):** Changed from default (`5`/`10`) to `35` inside **both** `Wasabi.json` and `JoinMarket.json`. This ensures the sweep command loops internally until the score hits 35 before executing the final bridge transaction.
+* **Economic Safeguard (`PlebStopThreshold`):** Temporarily lowered in `Wasabi.json` to `0.001` to allow a small `0.0045` BTC test UTXO to be picked up by the automated sweep engine. *(Note: Should be returned to `0.005` for mainnet operation).*
+* **Dust Shield (`DustThreshold`):** Verified it remains at the default `0.00001` BTC (1,000 sats) inside `Config.json` to automatically ignore and isolate chain-analysis dusting attacks.
+
+---
+
+## 7. The Core Command Cheatsheet
+
+### Process & Daemon Management
+
+* **Reload Systemd (after config edits):** `systemctl daemon-reload`
+* **Restart Daemon:** `systemctl restart wasabi.service`
+* **Filter Live WabiSabi Logs:** `journalctl -fu wasabi.service | grep -i "WabiSabi\|CoinJoin"`
+
+### Wasabi RPC Commands (Port 37128)
+
+* **Trigger Automated Pipeline:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"startcoinjoinsweep","params":["", "JoinMarket"]}' http://127.0.0.1:37128/Wasabi`
+* **Force Internal Mix (Ignores PlebStop):**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"startcoinjoin","params":["", true, true]}' http://127.0.0.1:37128/Wasabi`
+* **Check Spendable Balances:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"listunspentcoins"}' http://127.0.0.1:37128/Wasabi`
+* **Generate Fresh Hot Wallet Address:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"getnewaddress","params":{"label":"Remix"}}' http://127.0.0.1:37128/Wasabi`
+
+### Live Dashboard Loop
+
+Run this to track the real-time sweep destination:
+
+```bash
+while true; do
+  curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"listpaymentsincoinjoin"}' http://127.0.0.1:37128/Wasabi
+  echo ""
+  sleep 5
+done
+```
+
+---
+
+## 8. Problems Solved & Edge Cases Documented
+
+* **Premature Sweep Execution:** Discovered that `startcoinjoinsweep` calculates its execution based on the *destination wallet's* configuration file. If `JoinMarket.json` is set to an anonymity score of 10, Wasabi will sweep after a single round. Setting the destination file to 35 forces Wasabi to hold the funds in the hot wallet and mix internally until the threshold is met.
+* **Sweep Command Skipping Funds:** Found that the `startcoinjoinsweep` command strictly adheres to the total wallet balance requirement (`PlebStopThreshold`). Unlike the standard `startcoinjoin` command, the sweep command does not accept an inline override parameter. You must edit the threshold in the `.json` file to sweep smaller amounts.
+* **Missing Dust / "Ghost" UTXOs:** Small UTXOs missing from the `listunspentcoins` output are intentionally hidden by the `DustThreshold` limit. It was determined best practice to leave these invisible and unspent to avoid linking mixed funds to chain-analysis dusting attacks.
+* **"No Wallet Loaded" RPC Errors:** Resolved by explicitly passing `--wallet` arguments to the systemd service. If omitted, the Wasabi daemon boots in a blank state and rejects all RPC commands until wallets are manually loaded via API.
