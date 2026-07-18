@@ -1,0 +1,760 @@
+================================================================================
+File: ./PROXMOX_ARCHITECTURE_MATRIX.md
+================================================================================
+# PROXMOX 9.2 & STARTOS ARCHITECTURE MATRIX: STATUS REPORT
+
+# Target Audience: Jules (Security & Integrity Auditor)
+
+# Status: Initial Host Baseline & Guest Provisioning Complete. Host is running headless
+
+## 1. SYSTEM BASELINE & HARDWARE TOPOLOGY
+
+* Host Machine: Minisforum NAB9 Plus (Intel Core i9, 64GB RAM, Dual 2.5GbE NICs).
+* Hypervisor OS: Proxmox VE 9.2 (Bare-metal deployment based on Debian Trixie layer).
+* Core Workstation: Native Pop!_OS system executing administration via Mozilla Firefox & SSH.
+* Primary Host Storage: 500GB Internal NVMe (`/dev/nvme0n1`) initialized as a single-disk ZFS RAID0 array. This profile handles host binaries and local guest root partitions while enforcing native ZFS copy-on-write capabilities for rapid snapshot delivery to the Synology NAS backend (`THETDY-SYN`).
+
+## 2. SYSTEM-LEVEL HARDENING POLICIES
+
+* Management Network Layer: Hardcoded static footprint (`192.168.0.10/24`) bound directly to physical port `enp2s0` (permanently pinned as internal hardware target `nic0` via Proxmox 9 predictable hardware mapping). Accessible via `https://192.168.0.10`.
+* IP Conflict Prevention: Router-level DHCP reservation remains active for MAC `58:47:ca:7d:b9:bf` to form a hybrid static reservation boundary.
+* CLI Security Profile: Host SSH daemon updated to completely disable password entry fields (`PasswordAuthentication no`). Authentication is strictly limited to cryptographic Ed25519 public key verification signatures.
+* Web UI Security Profile: Data-center level authentication hardened via root-account Time-Based One-Time Password (TOTP) 2FA.
+
+## 3. ACTIVE GUEST RUNTIME ARCHITECTURE: VM 100 (startos-node)
+
+* Guest OS: StartOS x86_64 architecture (Native self-custody environment).
+* Local Identity Matrix: Permanently accessible via local network domain `http://leather-icepack.local` and static IP `https://192.168.0.12`.
+* Workstation Trust Layer: StartOS local Root Certificate Authority (Root CA) manually integrated into the Firefox NSS Certificate Database on Pop!_OS. This enforces valid local TLS end-to-end encryption across all configuration paths.
+
+### Provisioned Virtual Hardware Footprint
+
+* Chipset / Firmware: Modern `q35` machine chipset architecture running on top of an isolated `OVMF (UEFI)` firmware layer.
+* Compute Resources: 4 vCPU cores allocated with direct `host` passthrough execution to pass bare-metal Intel cryptographic instructions straight into the guest kernel.
+* Volatile Memory: 16GB of static unballooned RAM to guarantee dedicated performance for blockchain database processing.
+* Internal OS Volume (`scsi0`): 100GB thin-provisioned allocation backed by the host ZFS pool. Native guest TRIM optimization enabled (`discard=on`) to automatically reclaim dead sectors.
+* Data Storage Volume (`usb0`): Physical 2TB external USB SSD (SSK Storage, `0bda:9210`) passed completely through to the VM layout.
+* Data Strategy (Path A): Drive was cleanly formatted and initialized using native StartOS LUKS storage encryption layers. Initial Block Download (IBD) is 100% complete.
+* Further Details: See `vms/startos_node_100.md` for extended privacy, networking, and Bitcoin stack (Knots, Fulcrum, Mempool) details.
+
+## 4. ACTIVE GUEST RUNTIME ARCHITECTURE: LXC 200 (wireguard-vpn)
+
+* Guest Environment: WireGuard VPN container (Phase 3 Complete).
+* Network Layer: Static IP `192.168.0.11/24` (Gateway: `192.168.0.1`). Accessible via `https://192.168.0.11`.
+* Cryptographic Routing: Interface `wg0` active. Tunnel port set to UDP `51820`.
+* UI Management: WGDashboard active at `http://192.168.0.11:10086`.
+* Telemetry Note: Proxmox LXC metrics do not reflect kernel-space WireGuard encryption; refer to main node metrics for true CPU load.
+* Further Details: See `containers/wireguard_vpn_200.md` for extended configuration information and external ingress status.
+
+
+================================================================================
+File: ./PROXMOX_SECURITY_AUDIT.md
+================================================================================
+PROXMOX MIGRATION INITIAL SECURITY AUDIT
+
+1. MAC Address Caching & DHCP Lease Overlap (enp2s0 to vmbr0)
+The "Gotchas" & Integrity Risks:
+
+When transitioning enp2s0 from hosting an Ubuntu/Docker stack to a Proxmox bridge (vmbr0), the physical MAC address (58:47:ca:7d:b9:bf) remains the same, but the networking stack handles the address differently.
+
+    ARP/MAC Caching: The router and other devices on the flat LAN currently have ARP entries mapping the static IP to enp2s0's MAC. When Proxmox creates vmbr0, it inherits the MAC address of the physical interface. Because the MAC stays the same, ARP caching is unlikely to break connectivity entirely, but the switch/router might briefly get confused by the port state cycling during the wipe and installation.
+        Mitigation: A simple reboot of the router or clearing its ARP cache after the Proxmox installation finishes will resolve any stale entries and ensure clean routing to the bridge.
+
+    DHCP Lease Reservation vs. Static Configuration: You noted the static IP is managed via a DHCP reservation on the router. However, Proxmox's management interface (on vmbr0) typically requires a static IP configured directly within the OS (/etc/network/interfaces), bypassing the DHCP client entirely.
+        Risk: If the router's DHCP server doesn't actively see a DHCP request, but the IP is in use, it could theoretically cause a conflict if the reservation is removed.
+        Mitigation: Keep the DHCP reservation intact on the router. This explicitly excludes your Proxmox IP from the general pool, ensuring the router never accidentally hands it out to a random device, even though Proxmox isn't actively requesting a lease.
+
+2. Architectural Vulnerabilities & Missing Isolation Layers
+A. Flat LAN Subnet (Missing Network Isolation)
+
+    Risk: Operating on a single, flat LAN subnet means that if any single service (e.g., Plex or a misconfigured Nginx) is compromised, the attacker has unobstructed line-of-sight to the Proxmox Management UI, the Start9 VM, the Synology NAS, and all other local devices.
+    Recommendation: While you can start flat, you should heavily plan to migrate to VLANs at the router/switch level.
+        VLAN 1: Management (Proxmox UI, Synology admin interface).
+        VLAN 2: Services (Plex, Nginx, Pi-hole).
+        VLAN 3: Start9/High Security.
+
+B. Unprivileged vs. Privileged LXC Containers
+
+    Risk: Running services in Unprivileged LXCs is excellent for security. However, specific workloads require deeper access to host hardware:
+        Plex (/dev/dri): Passing the Intel iGPU to an unprivileged container requires precise group ID (GID) mapping between the Proxmox host and the LXC guest. If configured incorrectly, users often default to Privileged containers, breaking isolation.
+        WireGuard (/dev/net/tun): WireGuard needs access to the host's TUN device.
+    Recommendation: Enforce unprivileged containers. Use Proxmox's lxc.cgroup2.devices.allow and lxc.mount.entry in the container configuration files to pass through only the specific /dev/dri and /dev/net/tun devices. Avoid the temptation to make them privileged if permissions issues arise during setup.
+
+C. Nginx Proxy Manager (NPM) Access Lists
+
+    Risk: Relying on NPM's Access Control Lists (ACLs) to block WAN traffic implies you are considering forwarding port 80/443 to NPM.
+    Recommendation: Since you stated "No services... are exposed broadly to the WAN" except WireGuard, NPM should not have ports 80/443 forwarded from the internet edge router at all. The edge router's firewall must drop all unsolicited inbound WAN traffic by default, only allowing the WireGuard UDP port. NPM should only act as a local reverse proxy for user-friendly DNS names on the LAN and through the VPN tunnel.
+
+D. Start9 VM Isolation & Outbound Rules
+
+    Risk: Residing on a flat LAN exposes the Start9 VM to local broadcast traffic or scanning by other compromised LXCs.
+    Recommendation: Utilize the built-in Proxmox Datacenter/Node Firewall. Apply a firewall policy directly to the Start9 VM's virtual network interface (net0):
+        Default Policy: DROP all Inbound and Outbound.
+        Allow Outbound: Explicitly allow outbound traffic strictly to necessary ports (e.g., Tor relay ports).
+        This ensures that even on a flat LAN, the Proxmox hypervisor acts as a strict firewall for the VM.
+
+E. NFS Backup Traffic over Main LAN
+
+    Risk: NFS traffic is typically unencrypted in transit. Transmitting backup snapshots—which contain the full state of the VMs/LXCs, including the Start9 VM's memory state and any decrypted data—over the flat LAN exposes this highly sensitive data to packet sniffing if any local device (like an IoT device or Plex container) is compromised.
+    Benefit of a Dedicated VLAN/Network: Yes, there is a massive benefit. Isolating NFS traffic onto a dedicated storage VLAN guarantees that general LAN devices cannot sniff the backup stream.
+        Pro Tip: Since your enp3s0 interface is currently dormant, consider running a direct physical ethernet cable from enp3s0 to a secondary NIC on the Synology NAS. Assign them both IPs in an isolated subnet (e.g., 10.99.99.x) with no gateway. Bind the Proxmox Storage/NFS backup target strictly to this interface. This creates a physically air-gapped, zero-switch backup pipeline.
+
+F. Unencrypted Host for High Availability
+
+    Risk: Physical theft of the Minisforum host exposes all LXC configurations, Proxmox root passwords, and any data not encrypted at the guest level.
+    Mitigation: You have accepted this risk for HA purposes. Ensure the Start9 VM's internal LUKS encryption uses a strong passphrase, and verify the Synology Hyper Backup encryption for offsite protection is functioning correctly. Ensure no sensitive keys are hardcoded in the unencrypted LXCs (like NPM configs or cleartext WireGuard client configs).
+
+3. Hardware & OS Compatibility
+StartOS Image Selection
+
+    Image: StartOS v0.4.0 x86_64/AMD64-slim (FOSS-only)
+    Compatibility: This image is perfectly compatible with the hardware.
+        Architecture Match: The Minisforum NAB9 Plus runs an Intel Core i9, which utilizes the x86_64 instruction set.
+        Proxmox VM Support: Proxmox uses KVM to virtualize x86_64 hardware natively. When creating the VM for Start9, you can pass through the virtualized x86_64 CPU cores directly to the guest OS.
+        Security Posture: The FOSS-only ("slim") variant removes proprietary binary blobs, which cleanly aligns with the high-security and self-custody goals for the Start9 node.
+
+
+================================================================================
+File: ./containers/jules_sovereign_privacy_pipeline_cheatsheet.md
+================================================================================
+# Jules' Sovereign Privacy Pipeline: Cheat Sheet
+
+## Architecture Overview
+
+* **VLAN 30 (Sovereign Stack):** Proxmox LXC hosting Wasabi & JoinMarket.
+* **Node:** StartOS (Bitcoin Knots & Fulcrum) via Tor.
+* **Workflow:** Deposit -> Wasabi Mixes (Jar 0) -> JoinMarket Sweeps to Lightning.
+
+---
+
+## 1. Node Database Management (StartOS)
+
+JoinMarket requires a dedicated descriptor wallet database on the Knots node to track addresses.
+
+**Create the Node Database:**
+curl -x socks5h://localhost:9050 --user "USER:PASSWORD" \
+  --data-binary '{"jsonrpc": "1.0", "id": "1", "method": "createwallet", "params": {"wallet_name": "jm_wallet", "disable_private_keys": true, "blank": true, "descriptors": true, "load_on_startup": true}}' \
+  -H 'content-type: text/plain;' http://YOUR_NODE.onion:8332/
+
+**Force a Rescan (If importing an old seed):**
+curl -x socks5h://localhost:9050 --user "USER:PASSWORD" \
+  --data-binary '{"jsonrpc": "1.0", "id": "1", "method": "rescanblockchain", "params": [800000]}' \
+  -H 'content-type: text/plain;' http://YOUR_NODE.onion:8332/wallet/jm_wallet
+
+---
+
+## 2. JoinMarket Quick Commands
+
+*Run all JM commands from `/opt/joinmarket-clientserver/scripts/` using `torsocks`.*
+
+**Wallet Summary (View Balances & Addresses):**
+torsocks ./wallet-tool.py wallet.jmdat
+
+**View Recovery Seed:**
+torsocks ./wallet-tool.py wallet.jmdat showseed
+
+**Extract Zpub (Mixdepth 0):**
+torsocks ./wallet-tool.py -m 0 wallet.jmdat
+
+**Start Yield Generator (Maker Mode):**
+torsocks python yg-privacyenhanced.py wallet.jmdat
+
+**Sweep to Lightning Node (Taker Mode):**
+torsocks python sendpayment.py -N 5 -m 0 wallet.jmdat 0 <STARTOS_LIGHTNING_ADDRESS>
+
+---
+
+## 3. Wasabi Quick Commands
+
+*Run all Wasabi commands from `/opt/wasabi/`.*
+
+**Start the Headless Daemon:**
+./wassabeed &
+
+**Recover an Existing Seed:**
+./wassabocli wallet recover --wallet:jm_pipeline
+
+**Start Auto-Coinjoin:**
+./wassabocli mix start --wallet:jm_pipeline
+
+**Stop Auto-Coinjoin:**
+./wassabocli mix stop --wallet:jm_pipeline
+
+---
+
+## 4. The Execution Workflow
+
+To prevent database conflicts and privacy leaks on a shared seed, follow this strict order of operations:
+
+1. **Stop JoinMarket:** Ensure `yg-privacyenhanced.py` is NOT running.
+2. **Start Wasabi:** Launch `wassabeed` and begin the mix.
+3. **Wait for 100%:** Allow Wasabi to achieve full anonymity set targets.
+4. **Stop Wasabi:** Stop the mixing daemon entirely.
+5. **Engage JoinMarket:** Launch the Yield Generator to earn routing fees on the
+mixed UTXOs in Jar 0, OR sweep them directly to your Lightning Node.
+
+---
+
+## 5. Critical File Locations
+
+* **Systemd Service File:** `/etc/systemd/system/wasabi.service`
+* **Global Engine Configuration:** `/root/.walletwasabi/client/Config.json`
+* **Hot Wallet Config:** `/root/.walletwasabi/client/Wallets/Wasabi.json`
+* **Cold Destination Config:** `/root/.walletwasabi/client/Wallets/JoinMarket.json`
+
+---
+
+## 6. Configuration Changes & States
+
+* **Systemd Auto-Mounting:** Modified the `ExecStart` line in `wasabi.service` to auto-load both wallets into active memory on boot. The line now reads:
+  `ExecStart=/opt/wasabi/WasabiWallet/wassabeed --jsonrpcserverenabled=true --wallet=Wasabi --wallet=JoinMarket`
+* **Target Anonymity Score (`AnonScoreTarget`):** Changed from default (`5`/`10`) to `35` inside **both** `Wasabi.json` and `JoinMarket.json`. This ensures the sweep command loops internally until the score hits 35 before executing the final bridge transaction.
+* **Economic Safeguard (`PlebStopThreshold`):** Temporarily lowered in `Wasabi.json` to `0.001` to allow a small `0.0045` BTC test UTXO to be picked up by the automated sweep engine. *(Note: Should be returned to `0.005` for mainnet operation).*
+* **Dust Shield (`DustThreshold`):** Verified it remains at the default `0.00001` BTC (1,000 sats) inside `Config.json` to automatically ignore and isolate chain-analysis dusting attacks.
+
+---
+
+## 7. The Core Command Cheatsheet
+
+### Process & Daemon Management
+
+* **Reload Systemd (after config edits):** `systemctl daemon-reload`
+* **Restart Daemon:** `systemctl restart wasabi.service`
+* **Filter Live WabiSabi Logs:** `journalctl -fu wasabi.service | grep -i "WabiSabi\|CoinJoin"`
+
+### Wasabi RPC Commands (Port 37128)
+
+* **Trigger Automated Pipeline:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"startcoinjoinsweep","params":["", "JoinMarket"]}' http://127.0.0.1:37128/Wasabi`
+* **Force Internal Mix (Ignores PlebStop):**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"startcoinjoin","params":["", true, true]}' http://127.0.0.1:37128/Wasabi`
+* **Check Spendable Balances:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"listunspentcoins"}' http://127.0.0.1:37128/Wasabi`
+* **Generate Fresh Hot Wallet Address:**
+  `curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"getnewaddress","params":{"label":"Remix"}}' http://127.0.0.1:37128/Wasabi`
+
+### Live Dashboard Loop
+
+Run this to track the real-time sweep destination:
+
+```bash
+while true; do
+  curl -s --data-binary '{"jsonrpc":"2.0","id":"1","method":"listpaymentsincoinjoin"}' http://127.0.0.1:37128/Wasabi
+  echo ""
+  sleep 5
+done
+```
+
+---
+
+## 8. Problems Solved & Edge Cases Documented
+
+* **Premature Sweep Execution:** Discovered that `startcoinjoinsweep` calculates its execution based on the *destination wallet's* configuration file. If `JoinMarket.json` is set to an anonymity score of 10, Wasabi will sweep after a single round. Setting the destination file to 35 forces Wasabi to hold the funds in the hot wallet and mix internally until the threshold is met.
+* **Sweep Command Skipping Funds:** Found that the `startcoinjoinsweep` command strictly adheres to the total wallet balance requirement (`PlebStopThreshold`). Unlike the standard `startcoinjoin` command, the sweep command does not accept an inline override parameter. You must edit the threshold in the `.json` file to sweep smaller amounts.
+* **Missing Dust / "Ghost" UTXOs:** Small UTXOs missing from the `listunspentcoins` output are intentionally hidden by the `DustThreshold` limit. It was determined best practice to leave these invisible and unspent to avoid linking mixed funds to chain-analysis dusting attacks.
+* **"No Wallet Loaded" RPC Errors:** Resolved by explicitly passing `--wallet` arguments to the systemd service. If omitted, the Wasabi daemon boots in a blank state and rejects all RPC commands until wallets are manually loaded via API.
+
+
+================================================================================
+File: ./containers/wasabi_joinmarket_pipeline.md
+================================================================================
+# Wasabi & JoinMarket Pipeline Architecture & Setup
+
+## 1. Target Architecture
+
+- **Hypervisor:** Proxmox VE
+- **Environment:** Debian 12 Standard LXC (1 Core, 1GB RAM minimum)
+- **Network Interface:** Bridged (`vmbr0`) to the local subnet.
+- **Base Node Target:** Bitcoin Knots running via StartOS VM on the same local subnet. RPC port `8332`.
+- **Primary Goal:** Automate a deployment that runs a headless Wasabi daemon (`wassabeed`) and the JoinMarket CLI in parallel to act as a localized, fully automated CoinJoin-to-Lightning liquidity pipeline.
+
+## 2. System Dependencies
+
+Provisioning script to install the prerequisites before pulling repositories:
+
+```bash
+#!/bin/bash
+sudo apt-get update
+sudo apt-get install -y python3-dev python3-pip python3-venv git build-essential automake pkg-config libtool libffi-dev libssl-dev tor jq wget gnupg
+```
+
+## 3. Component A: JoinMarket Deployment
+
+Follow these steps to deploy JoinMarket:
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/JoinMarket-Org/joinmarket-clientserver.git
+   cd joinmarket-clientserver
+   ```
+
+2. Execute the headless installation:
+
+   ```bash
+   ./install.sh --without-qt
+   ```
+
+3. Generate the default `joinmarket.cfg`:
+
+   ```bash
+   source jmvenv/bin/activate
+   cd scripts
+   python wallet-tool.py generate
+   ```
+
+4. Configuration Patching:
+   The following `sed` script modifies `~/.joinmarket/joinmarket.cfg` to point to the StartOS Knots local IP, setting `rpc_port = 8332`, and inserting placeholders for `rpc_user` and `rpc_password`.
+
+   ```bash
+   sed -i -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_host = .*/rpc_host = <STARTOS_IP>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_port = .*/rpc_port = 8332/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_user = .*/rpc_user = <RPC_USER>/' \
+          -e '/^\[BLOCKCHAIN\]/,/^\[/ s/^rpc_password = .*/rpc_password = <RPC_PASSWORD>/' \
+          ~/.joinmarket/joinmarket.cfg
+   ```
+
+## 4. Component B: Wasabi Deployment & Configuration
+
+### 4.1 Cryptographic Verification & Extraction
+
+To ensure a completely pristine environment free of orphaned files, execute a clean installation and mathematically verify the binaries against the official developer keys.
+
+1. Pull the latest Linux standalone binary for `wassabeed`:
+
+   ```bash
+   # Download binary and PGP signature
+   wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz
+   wget https://github.com/WalletWasabi/WalletWasabi/releases/download/v2.8.0/Wasabi-2.8.0-linux-x64.tar.gz.asc
+
+   # Verify SHA256 checksum
+   echo "fd1053949660e20c280fe79e8d6b43e9149694b712247d1ae3ac3b7486616ec0  Wasabi-2.8.0-linux-x64.tar.gz" | sha256sum -c -
+
+   # The Key Import: Pull the official zkSNACKs PGP public key directly into the root Linux keyring.
+   # (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
+   wget -qO- https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt | gpg --import
+
+   # The Signature Match & Verification:
+   # Run the `gpg --verify` command against the two files to achieve the `Good signature from "zkSNACKs"` output, proving the archive was untampered with.
+   gpg --verify Wasabi-2.8.0-linux-x64.tar.gz.asc Wasabi-2.8.0-linux-x64.tar.gz
+
+   tar -xzf Wasabi-2.8.0-linux-x64.tar.gz
+   ```
+
+### 4.2 Bypassing the StartOS SSL & Tor Network Blocks
+
+Connecting an external daemon to StartOS requires navigating two distinct security walls: StartOS uses self-signed SSL certificates for its local network proxy (which Wasabi's `.NET` core rejects), and Wasabi inherently forces traffic through Tor (which drops local `192.168.x.x` IP addresses).
+
+- **The Solution:** Bypass the local network and route the connection directly to the node's Tor interface (`.onion` address) on the standard RPC port `8332`.
+- **Why it works:** Tor natively provides the end-to-end encryption Wasabi demands (eliminating the SSL certificate conflict) while seamlessly satisfying Wasabi's strict Tor proxy routing rules.
+
+### 4.3 Minting RPC Credentials
+
+StartOS actively strips standard `rpcuser` and `rpcpassword` lines from its configuration files to prevent local brute-force attacks.
+
+- Instead of using the main server password, navigate to the **StartOS Dashboard -> Bitcoin Knots -> Actions** menu.
+- Execute the **Generate RPC User Credentials** action to mathematically mint a dedicated, randomized password exclusively for Wasabi's use.
+
+### 4.4 Injecting the Configuration Parameters
+
+Modern Wasabi architecture relies entirely on direct JSON-RPC connections rather than legacy P2P endpoints.
+
+- **Clearing the Markdown Bug:** We encountered `.NET` daemon crashes due to hidden rich-text markdown formatting (`//[https://...]`) carrying over from the clipboard into the terminal editor. Bypass this by manually typing the strings or using direct `sed` commands to programmatically inject the clean text.
+- **The Final Parameters:** Populate `Config.json` with the `.onion` endpoint (formatted as standard `http://` since Tor natively handles the encryption) and the newly minted RPC credentials.
+- **The Cache Flush:** Wipe the `~/.walletwasabi/client/IndexStore/` directory before the final boot to ensure Wasabi doesn't fall back on dirty block filters previously fetched from public nodes.
+
+### 4.5 Validating Node Sovereignty
+
+- **The Mempool Fallbacks:** The `Config.json` defaults point the exchange rate, fee estimation, and external broadcaster to Mempool.space. Wasabi queries Mempool.space strictly over Tor for fiat exchange rates (which the local node cannot provide) and uses it only as an emergency broadcast fallback.
+- **The Proof:** Confirm the terminal output (`Fetched fee rate from RPC node...`) mathematically proves the daemon successfully bypassed the fallback and is routing primary transaction data strictly through the sovereign local node.
+
+### 4.6 Deploying the Background Service
+
+Because launching the daemon in the foreground causes it to crash the moment the terminal is closed (via the `Ctrl+C` interrupt signal), wrap the program in a permanent system daemon.
+
+1. Create an unprivileged user for the daemon and set ownership of the binary:
+
+   ```bash
+   sudo useradd -r -s /bin/false wasabi
+   sudo chown -R wasabi:wasabi WalletWasabi-2.8.0 # Adjust path to the extracted directory
+   ```
+
+2. Create a standard `systemd` file at `/etc/systemd/system/wasabi.service` to manage the daemon's uptime:
+
+   ```ini
+   [Unit]
+   Description=Wasabi Daemon
+   After=network.target
+
+   [Service]
+   ExecStart=/path/to/wassabeed --wallet=<WALLET_NAME> --jsonrpcserverenabled=true
+   Restart=always
+   User=wasabi
+   Group=wasabi
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   *Enable and start the service to lock the daemon into the Proxmox startup sequence:*
+
+   ```bash
+   sudo systemctl enable wasabi
+   sudo systemctl start wasabi
+   ```
+
+3. **Note to User:** Wallet files (`.json`) will be manually transferred via `scp` from the desktop client to inherit the GUI-configured CoinJoin rules.
+
+### 4.7 Video Resource
+
+[Wasabi Wallet Setup and Synchronization Guide](https://www.youtube.com/watch?v=tKwGkR3EcJY)
+
+This tutorial provides a clear visual walkthrough of the wallet installation and initial setup steps, which is extremely helpful when verifying that your backend configurations are synchronizing correctly with the front-end interface.
+
+## 5. Execution Wrappers
+
+Lightweight, executable shell scripts to wrap manual commands.
+
+- **Wasabi RPC Wrapper (`wasabi_rpc.sh`):**
+
+  ```bash
+  #!/bin/bash
+  METHOD=$1
+  PARAMS=${2:-"[]"}
+  curl -s --data-binary "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"$METHOD\", \"params\":$PARAMS}" http://127.0.0.1:37128/<WALLET_NAME> | jq
+  ```
+
+- **Wasabi Status (RPC) (`check_balance.sh`):**
+
+  ```bash
+  #!/bin/bash
+  ./wasabi_rpc.sh getwalletinfo
+  ```
+
+- **Wasabi Receive Address (RPC) (`get_address.sh`):**
+
+  ```bash
+  #!/bin/bash
+  ./wasabi_rpc.sh getnewaddress "[\"<LABEL>\"]"
+  ```
+
+- **JoinMarket Extract Jar 0 Zpub (`jm_extract_zpub.sh`):**
+
+  ```bash
+  #!/bin/bash
+  # Run this within the jmvenv environment and scripts directory
+  python wallet-tool.py -m 0 wallet.jmdat
+  ```
+
+- **JoinMarket Taker Sweep (To Lightning On-Chain) (`sweep_to_lightning.sh`):**
+
+  ```bash
+  #!/bin/bash
+  # Run this within the jmvenv environment and scripts directory
+  python sendpayment.py -N 5 -m 0 wallet.jmdat 0 <DESTINATION_ADDRESS>
+  ```
+
+## 6. Strict Networking Constraints
+
+- **No nested Tor.** JoinMarket relies on the system Tor daemon (`9050`). Wasabi natively builds its own circuits. Do not configure system-wide transparent Tor proxying.
+- The LXC must have direct LAN access to the StartOS IP to hit the Knots RPC without routing through external VPNs.
+
+
+================================================================================
+File: ./containers/wasabi_joinmarket_routing_cheatsheet.md
+================================================================================
+# Jules Cheatsheet: Headless Wasabi & JoinMarket Routing via StartOS
+
+## Architecture Overview
+
+* **Host Environment:** Proxmox LXC Container (Debian/Ubuntu)
+* **Target Node:** StartOS Bitcoin Knots (Tor Interface)
+* **Protocols:** Wasabi Daemon (`wassabeed`) & JoinMarket (`wallet-tool.py`)
+* **Routing Strategy:** `.onion` RPC tunneling to bypass StartOS LAN port blocking (8332) and self-signed SSL certificate rejections (64747).
+
+---
+
+## Phase 1: StartOS RPC Credential Minting
+
+StartOS natively strips out standard `rpcuser` and `rpcpassword` lines from its UI configuration to prevent brute-force attacks. You cannot use your server password or manually define one.
+
+1. Navigate to the StartOS Dashboard -> **Bitcoin Knots**.
+2. Click **Actions**.
+3. Execute **Generate RPC User Credentials**.
+4. Copy the generated Username and highly randomized Password.
+
+---
+
+## Phase 2: Wasabi Daemon Deployment
+
+Wasabi 2.0 deprecated the `BitcoinP2pEndPoint` and `UseBitcoinCore` settings. It relies strictly on direct RPC connections for block filters and mempool queries.
+
+### 1. Generate Configuration
+
+```bash
+cd /opt/wasabi/WasabiWallet
+./wassabeed
+# Let it run for 10 seconds, then press Ctrl+C to build the directory.
+```
+
+### 2. Configure the Tor RPC Bridge
+
+Avoid text editors if clipboard markdown corruption (e.g., `//[http...]`) is an issue. Use `sed` to programmatically inject the routing details into the JSON file.
+
+```bash
+# Inject the StartOS Tor address
+sed -i 's|"BitcoinRpcEndPoint".*|"BitcoinRpcEndPoint": "http://YOUR_KNOTS_ADDRESS.onion:8332",|g' ~/.walletwasabi/client/Config.json
+
+# Inject the generated StartOS RPC credentials
+sed -i 's|"BitcoinRpcCredentialString".*|"BitcoinRpcCredentialString": "YOUR_USER:YOUR_PASSWORD",|g' ~/.walletwasabi/client/Config.json
+```
+
+### 3. Flush Public Fallback Data
+
+If Wasabi previously failed to connect, it will have pulled block filters from public Tor nodes. Flush the index to force sovereign routing:
+
+```bash
+rm -rf ~/.walletwasabi/client/IndexStore/
+./wassabeed
+```
+
+---
+
+## Phase 3: JoinMarket Deployment
+
+JoinMarket is a suite of Python scripts and does not natively resolve `.onion` domains like Wasabi's compiled Tor binary does. It requires the OS to provide a local Tor proxy.
+
+### 1. Install OS-Level Tor Proxies
+
+```bash
+apt update && apt install tor torsocks -y
+systemctl enable tor
+systemctl start tor
+```
+
+### 2. Generate Configuration
+
+```bash
+source jmvenv/bin/activate
+cd scripts
+./wallet-tool.py generate
+# This will intentionally crash after generating ~/.joinmarket/joinmarket.cfg
+```
+
+### 3. Configure the Tor RPC Bridge
+
+Edit `~/.joinmarket/joinmarket.cfg`.
+*Critical Note:* Python requires a pure domain string for the `rpc_host`. Do **not** use an `http://` prefix or append `:8332` to the host line.
+
+```ini
+[DAEMON]
+rpc_host = YOUR_KNOTS_ADDRESS.onion
+rpc_port = 8332
+rpc_user = YOUR_USER
+rpc_password = YOUR_PASSWORD
+```
+
+### 4. Configure the Decentralized Messaging Network
+
+Modern JoinMarket deprecated the legacy IRC servers (`[MESSAGING:custom]`). Ensure the native Tor messaging layer is active.
+
+```ini
+[MESSAGING:onion]
+socks5_host = localhost
+socks5_port = 9050
+```
+
+### 5. Wallet Generation & Recovery Execution
+
+Because standard Python HTTP libraries cannot route `.onion` addresses, you must wrap all JoinMarket executions with `torsocks` to force the DNS lookup through the OS-level Tor daemon.
+
+* To generate a new wallet:
+
+```bash
+torsocks ./wallet-tool.py generate
+```
+
+* To restore an existing seed phrase (hot-mixing stack only):
+
+```bash
+torsocks ./wallet-tool.py recover
+```
+
+
+================================================================================
+File: ./containers/wireguard_vpn_200.md
+================================================================================
+# WireGuard VPN (LXC 200)
+
+## Overview
+
+* **Status**: Deployed, stress-tested, and fully operational (Phase 3 Complete)
+* **Purpose**: VPN Ingress for remote administration and secure access.
+
+## Container Properties
+
+* **ID**: 200
+* **Hostname**: wireguard-vpn
+* **Type**: LXC (Unprivileged container expected, requires `/dev/net/tun` passthrough mapping)
+
+## Network Configuration
+
+* **Static IP**: `192.168.0.11/24` (Accessible via `https://192.168.0.11`)
+* **Gateway**: `192.168.0.1`
+* **Cryptographic Routing**:
+  * **Interface**: `wg0` active
+  * **Tunnel Port**: UDP `51820`
+* **External Ingress**: Endpoint active at `thetdy.synology.me:51820` (UDP). Sustained 4K 60fps remote stream successful. Host limits: 14-Core Intel i9 processing pool confirmed sufficient for heavy cryptographic tunneling.
+
+## Management Interface
+
+* **UI Management**: WGDashboard active at `http://192.168.0.11:10086`
+
+
+================================================================================
+File: ./vms/startos_node_100.md
+================================================================================
+# StartOS Sovereign Bitcoin Stack (VM 100)
+
+## Overview
+
+- **Status**: STACK SECURED & OPERATIONAL. Currently awaiting Fulcrum database indexing completion.
+- **Purpose**: Privacy-first, self-hosted Bitcoin node, indexer, and explorer stack via StartOS on Proxmox.
+
+## Architecture & Network Privacy (Hybrid Model)
+
+- **Primary Goal Achieved**: 100% clearnet IP masking. Zero ports forwarded on the home router.
+- **Internal Access**: High-speed LAN/mDNS addresses configured for local wallet connections. Static IP: `https://192.168.0.12`.
+- **Remote Access**: Dedicated Tor `.onion` services generated for secure, encrypted external tunneling to the stack.
+- **Clearnet Leaks Plugged**: NAT-PMP explicitly disabled in Bitcoin Knots to prevent automated router port-forwarding backdoors.
+
+## Bitcoin Knots (The Foundation Layer)
+
+- **Sync Status**: Initial Block Download (IBD) 100% Complete.
+- **Privacy Settings**: Outbound P2P traffic strictly restricted to `onion (Tor)` and `i2p`. Tor system package successfully installed and routing.
+- **Data Configuration**: Archival mode confirmed (Pruning: 0 MiB). Transaction Index (`txindex`) enabled.
+- **App Messaging**: ZeroMQ (ZMQ) enabled for instantaneous local app communication (no Tor overhead).
+
+## Dependent Services (Fulcrum & Mempool)
+
+- **Hardware Provisioning**: Proxmox StartOS VM resources aggressively scaled (16GB RAM, 4+ Cores) to prevent Out-Of-Memory (OOM) failure during Fulcrum's heavy cryptographic indexing.
+- **Fulcrum (Indexer)**: Installed and linked to Knots. Tor `.onion` service generated for private remote Electrum wallet connections (Sparrow/Wasabi).
+- **Mempool (Explorer)**: Installed. Tor `.onion` service generated to allow private remote block and fee exploration without third-party metadata tracking.
+
+## Provisioned Virtual Hardware Footprint
+
+- **Chipset / Firmware**: Modern `q35` machine chipset architecture running on top of an isolated `OVMF (UEFI)` firmware layer.
+- **Compute Resources**: 4 vCPU cores allocated with direct `host` passthrough execution to pass bare-metal Intel cryptographic instructions straight into the guest kernel.
+- **Volatile Memory**: 16GB of static unballooned RAM to guarantee dedicated performance for blockchain database processing.
+- **Internal OS Volume (`scsi0`)**: 100GB thin-provisioned allocation backed by the host ZFS pool. Native guest TRIM optimization enabled (`discard=on`) to automatically reclaim dead sectors.
+- **Data Storage Volume (`usb0`)**: Physical 2TB external USB SSD (SSK Storage, `0bda:9210`) passed completely through to the VM layout.
+- **Data Strategy (Path A)**: Drive was cleanly formatted and initialized using native StartOS LUKS storage encryption layers. IBD 100% complete.
+
+## Resources & Documentation
+
+- [Zeus & StartOS Sovereign Node Cheat Sheet](./zeus_startos_cheat_sheet.md): Comprehensive guide on network hardening, Zeus mobile setup, privacy lockdown, liquidity management, and disaster recovery.
+
+
+================================================================================
+File: ./vms/zeus_startos_cheat_sheet.md
+================================================================================
+# Zeus & StartOS Sovereign Node Cheat Sheet
+
+## 1. Network & Interface Hardening
+
+- **Tor-Only Mode:** Activating the **Tor Only** toggle under your Core Lightning (CLN) configuration seals the external firewall. It strips away your public IPv4 block, leaving only an obfuscated .onion proxy for peer connections.
+- **The WireGuard / mDNS Protocol Rule:** Your private WireGuard tunnel operates strictly at Layer 3, meaning it does not route multicast/broadcast traffic.
+  - **The Symptom:** Local domain names like [http://leather-icepack.local/](http://leather-icepack.local/) will fail to resolve on your phone when connected via the VPN.
+  - **The Fix:** Bypass mDNS entirely by using your raw internal IP address (192.168.0.12) for all mobile browser bookmarks and app configurations. Alternatively, manually map the domain to the IP inside your Pi-hole **Local DNS Records**.
+
+## 2. Zeus Mobile Remote Control Setup
+
+Zeus does not hold your seed phrase or sign transactions directly; it acts purely as an encrypted remote control for your home server.
+
+- **Wallet Interface:** Select **Core Lightning (CLNRest)**. StartOS utilizes this lightweight Python plugin to translate your node's raw commands into a REST API that Zeus understands.
+- **Authentication (Runes):** Unlike LND's Macaroons, CLN uses **Runes**. These are disposable cryptographic permission slips. They do _not_ contain your Bitcoin and do _not_ need to be backed up. If your phone is lost or stolen, simply log into StartOS and **revoke** the Rune to immediately cut off the phone's access.
+- **Certificate Pinning:** The app will automatically read your node's unique self-signed TLS certificate fingerprint from the StartOS connection QR code. Pinning this certificate ensures "briefcase inside an armored car" security, protecting your traffic even if a malicious device penetrates your local LAN.
+
+## 3. Bulletproof Privacy Lockdown
+
+To prevent your mobile device from quietly leaking network data or tracking your IP address via public clearnet queries, apply these exact parameters:
+
+| Setting                     | Configuration                                     | Execution Details                                                                                                                          |
+| --------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Block Explorer**          | [http://192.168.0.12](http://192.168.0.12):[PORT] | Points Zeus directly to your local StartOS Mempool instance for private block lookups.                                                     |
+| **Mempool Fee Suggestions** | **OFF** (or set to local IP)                      | When off, Zeus falls back to native CLN commands (feerates), querying your own Bitcoin Core daemon over the VPN tunnel.                    |
+| **Fiat Price Source**       | **DISABLED**                                      | Eliminates the hardcoded third-party API pings (Coinbase, Kraken, etc.) that log your phone's IP whenever the app refreshes the USD price. |
+
+**Understanding the Fee Markets:**
+
+- **Off-Chain Routing Fees (Buying Coffee):** Calculated automatically by Zeus in milliseconds before you hit pay. It consists of a Base Fee (0–1 sat) + a variable Fee Rate (measured in ppm, parts per million). You never need to look these up manually.
+- **On-Chain Miner Fees (Heavy Infrastructure):** Measured in sat/vByte. You only need to check these manually on your StartOS Mempool dashboard when performing on-chain activities like opening channels, closing channels, splicing, or sweeping UTXOs.
+
+## 4. Phase 4: Channel Liquidity & Routing Management
+
+To establish a highly connected routing node, liquidity must be actively managed using your sovereign stack.
+
+- **Outbound Liquidity (Opening Channels):** Securely bridge your cold storage to your hot node. Send Bitcoin from your Coldcard hardware wallet, managed via Sparrow, and routed privately through your local Fulcrum indexer to your node's on-chain address. Open channels to well-connected Tier 1 hubs and Lightning Service Providers (LSPs) to minimize hop counts.
+- **Inbound Liquidity (Receiving Capacity):** Secure inbound capacity without trusting centralized exchanges by utilizing submarine swaps via services like Boltz or Lightning Loop. Alternatively, coordinate trustless liquidity triangles using platforms like LightningNetwork+.
+- **Active Maintenance:** Monitor channel health and liquidity balances via node management tools like ThunderHub or RideTheLightning (RTL). Access these tools strictly over the WireGuard VPN to close inactive channels and redeploy capital efficiently.
+
+## 5. Sovereign Capital Inflow (The Liquid Exit)
+
+To move funds off the Liquid sidechain and fund your on-chain node wallet without compromising your initial privacy pipeline:
+
+- **The Right Way (Decentralized Swap):** Use a trustless atomic swap bridge like Boltz. You send L-BTC on Liquid, and Boltz sends mathematically unlinked mainnet BTC directly to a fresh Taproot address on your node. This breaks the transaction chain, leaves no identity paper trail, and appears as a standard Taproot spend to outside observers.
+- **The Wrong Way (Official Peg-Out):** Avoid direct, official federation peg-outs. They require burning L-BTC through the Liquid Federation, which involves centralized whitelists, legal paper trails, and strict KYC/AML checkpoints.
+
+## 6. Disaster Recovery & The Proxmox Rule
+
+> ### ⚠️ CRITICAL WARNING: THE PROXMOX TRAP
+>
+> **Never use Proxmox VM snapshots, automated VM backups, or replication tasks for your StartOS node.**
+>
+> Rolling a Lightning node back to a snapshot—even one that is minutes old—causes immediate state-loss. When your node broadcasts an outdated database state (lightningd.sqlite3), the Lightning Network protocol automatically triggers its **penalty mechanism**. Your routing peers will immediately interpret this as a theft attempt and permanently seize 100% of the funds inside those channels.
+
+**The Correct Backup Hierarchy:**
+
+1. **The Master Defense (StartOS Native Backup):** Use the native StartOS backup utility to output to an external physical drive or network share. This safely captures both your on-chain HD wallet and your real-time channel database without risking a malicious state rollback.
+2. **The Bare-Metal Extraction (Plan B / Disaster Recovery):** If the server melts, you can recover completely from bare-metal using two files stored safely off-site:
+   - **hsm_secret:** The byte-form master seed of your node. This is the cryptographic root of your wealth; if you have this, your _on-chain_ funds can always be restored.
+   - **emergency.recover:** Your static channel backup. This file must be backed up every time a new channel is opened. When loaded into a clean node, it instructs your node to request that all peers **force-close** your channels, sweeping your channel liquidity safely back onto your on-chain wallet. It will _not_ reopen your routing channels.
+
+## Zeus & StartOS Sovereign Node Cheat Sheet - Part 2: The Privacy Pipeline
+
+This section documents the headless `wasabi_joinmarket_pipeline.md` architecture deployed alongside your main `startos_node_100.md` within the overarching Proxmox-main.zip environment.
+
+### 1. The Proxmox Architecture (LXC over VM)
+
+- **Lightweight Containers:** Deploy Wasabi and JoinMarket in a dedicated Ubuntu Server LXC container (ID: 300, Hostname: privacy-pipeline) rather than a full Virtual Machine. This shares the host's Linux kernel and drastically reduces RAM and CPU overhead.
+- **Resource Allocation:** Assign 2 CPU cores, 2048 MB of RAM, and roughly 20GB of disk space.
+- **Storage Placement:** Install the container strictly on the Proxmox host's internal local-zfs drive to avoid fighting Fulcrum for I/O bandwidth on your external USB database drive.
+- **Network Sequencing:** Assign a static internal IP (192.168.0.13) to seamlessly follow the `wireguard_vpn_200.md` tunnel at .11 and the StartOS node at .12. Ensure the container remains Unprivileged for maximum host security.
+
+### 2. Network Isolation (The "Two Tor" Solution)
+
+- **The Conflict:** JoinMarket requires a system-wide Tor daemon to run its yield-generating Maker service. If Wasabi is allowed to run its own internal Tor instance simultaneously, it causes port conflicts and wastes RAM.
+- **The Unified Gateway:** Install a single system-wide Tor daemon (`apt install tor`) inside the container. Wasabi is smart enough to detect this master service, disable its internal Tor, and route its CoinJoins through the shared proxy.
+- **Verification:** Always verify the container's exit node is successfully obfuscated by querying the local port:
+  `curl --socks5 localhost:9050 https://check.torproject.org/api/ip`
+
+### 3. The Proxmox Snapshot Strategy
+
+- **The Lightning Exemption:** Unlike a Lightning routing node, the privacy-pipeline container strictly handles on-chain CoinJoins and does not hold real-time channel states. Therefore, it is entirely immune to the Lightning Network's malicious state-loss penalty mechanism.
+- **Strategic Save Points:** You can and should use Proxmox snapshots during the build process. Creating snapshots like tor-verified-base and wasabi-extracted-base provides instant, clean rollback points if a script fails or a directory gets cluttered.
+
+### 4. Headless Wasabi Deployment (wassabeed)
+
+- **Background Engine:** Strip away the graphical user interface by exclusively running the `wassabeed` daemon. This minimizes resource consumption and runs silently in the background.
+- **Directory Management:** Never extract `.tar.gz` archives directly into the root home folder (`~`). Always create and navigate to a dedicated directory (`mkdir -p /opt/wasabi && cd /opt/wasabi`) to prevent system dependencies from scattering across the server.
+- **Dynamic Downloads:** Because GitHub repository names and version tags fluctuate, use `jq` to parse the official API and dynamically pull the exact browser download link:
+
+  ```bash
+  DOWNLOAD_URL=$(curl -sL https://api.github.com/repos/WalletWasabi/WalletWasabi/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-x64.tar.gz")) | .browser_download_url')
+  ```
+
+### 5. StartOS Node Integration (The Final Link)
+
+- **Sovereign Block Queries:** By default, Wasabi looks for a local Bitcoin node at `127.0.0.1`. Left unchanged, it will fall back to requesting block filters from public Tor nodes.
+- **The Local Reroute:** Modify the daemon's internal `Config.json` using the command line to permanently point both the `BitcoinP2pEndPoint` and `BitcoinRpcEndPoint` to your sovereign StartOS IP (`192.168.0.12`).
+- **The Result:** Wasabi securely verifies your CoinJoin balances by pulling blocks directly from your own Fulcrum indexer over the private Proxmox virtual network, ensuring zero data leakage to third-party servers.
