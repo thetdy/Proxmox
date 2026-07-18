@@ -2,10 +2,10 @@
 
 ## Architecture Overview
 
-* **Host Environment:** Proxmox LXC Container (Debian/Ubuntu)
-* **Target Node:** StartOS Bitcoin Knots (Tor Interface)
-* **Protocols:** Wasabi Daemon (`wassabeed`) & JoinMarket (`wallet-tool.py`)
-* **Routing Strategy:** `.onion` RPC tunneling to bypass StartOS LAN port blocking (8332) and self-signed SSL certificate rejections (64747).
+- **Host Environment:** Proxmox LXC Container (Debian/Ubuntu)
+- **Target Node:** StartOS Bitcoin Knots (Tor Interface)
+- **Protocols:** Wasabi Daemon (`wassabeed`) & JoinMarket (`wallet-tool.py`)
+- **Routing Strategy:** `.onion` RPC tunneling to bypass StartOS LAN port blocking (8332) and self-signed SSL certificate rejections (64747).
 
 ---
 
@@ -79,7 +79,7 @@ cd scripts
 ### 3. Configure the Tor RPC Bridge
 
 Edit `~/.joinmarket/joinmarket.cfg`.
-*Critical Note:* Python requires a pure domain string for the `rpc_host`. Do **not** use an `http://` prefix or append `:8332` to the host line.
+_Critical Note:_ Python requires a pure domain string for the `rpc_host`. Do **not** use an `http://` prefix or append `:8332` to the host line.
 
 ```ini
 [DAEMON]
@@ -103,13 +103,13 @@ socks5_port = 9050
 
 Because standard Python HTTP libraries cannot route `.onion` addresses, you must wrap all JoinMarket executions with `torsocks` to force the DNS lookup through the OS-level Tor daemon.
 
-* To generate a new wallet:
+- To generate a new wallet:
 
 ```bash
 torsocks ./wallet-tool.py generate
 ```
 
-* To restore an existing seed phrase (hot-mixing stack only):
+- To restore an existing seed phrase (hot-mixing stack only):
 
 ```bash
 torsocks ./wallet-tool.py recover
