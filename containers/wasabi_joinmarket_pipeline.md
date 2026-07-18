@@ -127,7 +127,7 @@ Because launching the daemon in the foreground causes it to crash the moment the
    After=network.target
 
    [Service]
-   ExecStart=/path/to/wassabeed --wallet=<WALLET_NAME> --jsonrpcserverenabled=true
+   ExecStart=/opt/wasabi/WasabiWallet/wassabeed --loglevel=trace --jsonrpcserverenabled=true --wallet=Wasabi --wallet=JoinMarketHot
    Restart=always
    User=wasabi
    Group=wasabi
@@ -136,7 +136,7 @@ Because launching the daemon in the foreground causes it to crash the moment the
    WantedBy=multi-user.target
    ```
 
-   *Enable and start the service to lock the daemon into the Proxmox startup sequence:*
+   _Enable and start the service to lock the daemon into the Proxmox startup sequence:_
 
    ```bash
    sudo systemctl enable wasabi
