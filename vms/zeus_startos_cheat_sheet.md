@@ -74,7 +74,7 @@ This section documents the headless `wasabi_joinmarket_pipeline.md` architecture
 ### 2. Network Isolation (The "Two Tor" Solution)
 
 - **The Conflict:** JoinMarket requires a system-wide Tor daemon to run its yield-generating Maker service. If Wasabi is allowed to run its own internal Tor instance simultaneously, it causes port conflicts and wastes RAM.
-- **The Unified Gateway:** Install a single system-wide Tor daemon (`apt install tor`) inside the container. Wasabi is smart enough to detect this master service, disable its internal Tor, and route its CoinJoins through the shared proxy.
+- **The Unified Gateway:** Install a single system-wide Tor daemon (`apt-get install tor`) inside the container. Wasabi is smart enough to detect this master service, disable its internal Tor, and route its CoinJoins through the shared proxy.
 - **Verification:** Always verify the container's exit node is successfully obfuscated by querying the local port:
   `curl --socks5 localhost:9050 https://check.torproject.org/api/ip`
 
