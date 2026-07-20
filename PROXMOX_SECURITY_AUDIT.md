@@ -1,7 +1,7 @@
-PROXMOX MIGRATION INITIAL SECURITY AUDIT
+# PROXMOX MIGRATION INITIAL SECURITY AUDIT
 
 1. MAC Address Caching & DHCP Lease Overlap (enp2s0 to vmbr0)
-The "Gotchas" & Integrity Risks:
+   The "Gotchas" & Integrity Risks:
 
 When transitioning enp2s0 from hosting an Ubuntu/Docker stack to a Proxmox bridge (vmbr0), the physical MAC address (58:47:ca:7d:b9:bf) remains the same, but the networking stack handles the address differently.
 
@@ -12,14 +12,14 @@ When transitioning enp2s0 from hosting an Ubuntu/Docker stack to a Proxmox bridg
         Risk: If the router's DHCP server doesn't actively see a DHCP request, but the IP is in use, it could theoretically cause a conflict if the reservation is removed.
         Mitigation: Keep the DHCP reservation intact on the router. This explicitly excludes your Proxmox IP from the general pool, ensuring the router never accidentally hands it out to a random device, even though Proxmox isn't actively requesting a lease.
 
-2. Architectural Vulnerabilities & Missing Isolation Layers
-A. Flat LAN Subnet (Missing Network Isolation)
+2.  Architectural Vulnerabilities & Missing Isolation Layers
+    A. Flat LAN Subnet (Missing Network Isolation)
 
-    Risk: Operating on a single, flat LAN subnet means that if any single service (e.g., Plex or a misconfigured Nginx) is compromised, the attacker has unobstructed line-of-sight to the Proxmox Management UI, the Start9 VM, the Synology NAS, and all other local devices.
-    Recommendation: While you can start flat, you should heavily plan to migrate to VLANs at the router/switch level.
-        VLAN 1: Management (Proxmox UI, Synology admin interface).
-        VLAN 2: Services (Plex, Nginx, Pi-hole).
-        VLAN 3: Start9/High Security.
+        Risk: Operating on a single, flat LAN subnet means that if any single service (e.g., Plex or a misconfigured Nginx) is compromised, the attacker has unobstructed line-of-sight to the Proxmox Management UI, the Start9 VM, the Synology NAS, and all other local devices.
+        Recommendation: While you can start flat, you should heavily plan to migrate to VLANs at the router/switch level.
+            VLAN 1: Management (Proxmox UI, Synology admin interface).
+            VLAN 2: Services (Plex, Nginx, Pi-hole).
+            VLAN 3: Start9/High Security.
 
 B. Unprivileged vs. Privileged LXC Containers
 
@@ -52,11 +52,11 @@ F. Unencrypted Host for High Availability
     Risk: Physical theft of the Minisforum host exposes all LXC configurations, Proxmox root passwords, and any data not encrypted at the guest level.
     Mitigation: You have accepted this risk for HA purposes. Ensure the Start9 VM's internal LUKS encryption uses a strong passphrase, and verify the Synology Hyper Backup encryption for offsite protection is functioning correctly. Ensure no sensitive keys are hardcoded in the unencrypted LXCs (like NPM configs or cleartext WireGuard client configs).
 
-3. Hardware & OS Compatibility
-StartOS Image Selection
+3.  Hardware & OS Compatibility
+    StartOS Image Selection
 
-    Image: StartOS v0.4.0 x86_64/AMD64-slim (FOSS-only)
-    Compatibility: This image is perfectly compatible with the hardware.
-        Architecture Match: The Minisforum NAB9 Plus runs an Intel Core i9, which utilizes the x86_64 instruction set.
-        Proxmox VM Support: Proxmox uses KVM to virtualize x86_64 hardware natively. When creating the VM for Start9, you can pass through the virtualized x86_64 CPU cores directly to the guest OS.
-        Security Posture: The FOSS-only ("slim") variant removes proprietary binary blobs, which cleanly aligns with the high-security and self-custody goals for the Start9 node.
+        Image: StartOS v0.4.0 x86_64/AMD64-slim (FOSS-only)
+        Compatibility: This image is perfectly compatible with the hardware.
+            Architecture Match: The Minisforum NAB9 Plus runs an Intel Core i9, which utilizes the x86_64 instruction set.
+            Proxmox VM Support: Proxmox uses KVM to virtualize x86_64 hardware natively. When creating the VM for Start9, you can pass through the virtualized x86_64 CPU cores directly to the guest OS.
+            Security Posture: The FOSS-only ("slim") variant removes proprietary binary blobs, which cleanly aligns with the high-security and self-custody goals for the Start9 node.

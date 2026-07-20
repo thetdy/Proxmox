@@ -62,21 +62,19 @@ To move funds off the Liquid sidechain and fund your on-chain node wallet withou
 
 ## Zeus & StartOS Sovereign Node Cheat Sheet - Part 2: The Privacy Pipeline
 
-This section documents the headless `wasabi_joinmarket_pipeline.md` architecture deployed alongside your main `startos_node_100.md` within the overarching Proxmox-main.zip environment.
+This section documents the headless `wasabi_boltz_pipeline.md` architecture deployed alongside your main `startos_node_100.md` within the overarching Proxmox-main.zip environment.
 
 ### 1. The Proxmox Architecture (LXC over VM)
 
-- **Lightweight Containers:** Deploy Wasabi and JoinMarket in a dedicated Ubuntu Server LXC container (ID: 300, Hostname: privacy-pipeline) rather than a full Virtual Machine. This shares the host's Linux kernel and drastically reduces RAM and CPU overhead.
-- **Resource Allocation:** Assign 2 CPU cores, 2048 MB of RAM, and roughly 20GB of disk space.
+- **Lightweight Containers:** Deploy Wasabi in a dedicated Ubuntu Server LXC container (ID: 300, Hostname: privacy-pipeline) rather than a full Virtual Machine. This shares the host's Linux kernel and drastically reduces RAM and CPU overhead.
+- **Resource Allocation:** Assign 1-2 CPU cores, 1-2GB of RAM, and roughly 20GB of disk space.
 - **Storage Placement:** Install the container strictly on the Proxmox host's internal local-zfs drive to avoid fighting Fulcrum for I/O bandwidth on your external USB database drive.
 - **Network Sequencing:** Assign a static internal IP (192.168.0.13) to seamlessly follow the `wireguard_vpn_200.md` tunnel at .11 and the StartOS node at .12. Ensure the container remains Unprivileged for maximum host security.
 
-### 2. Network Isolation (The "Two Tor" Solution)
+### 2. Network Constraints
 
-- **The Conflict:** JoinMarket requires a system-wide Tor daemon to run its yield-generating Maker service. If Wasabi is allowed to run its own internal Tor instance simultaneously, it causes port conflicts and wastes RAM.
-- **The Unified Gateway:** Install a single system-wide Tor daemon (`apt install tor`) inside the container. Wasabi is smart enough to detect this master service, disable its internal Tor, and route its CoinJoins through the shared proxy.
-- **Verification:** Always verify the container's exit node is successfully obfuscated by querying the local port:
-  `curl --socks5 localhost:9050 https://check.torproject.org/api/ip`
+- **Tor Implementation:** Wasabi natively builds its own circuits. Do not configure system-wide transparent Tor proxying.
+- **The Local Reroute:** The LXC must have direct LAN access to the StartOS IP to hit the Knots RPC without routing through external VPNs.
 
 ### 3. The Proxmox Snapshot Strategy
 
@@ -87,14 +85,17 @@ This section documents the headless `wasabi_joinmarket_pipeline.md` architecture
 
 - **Background Engine:** Strip away the graphical user interface by exclusively running the `wassabeed` daemon. This minimizes resource consumption and runs silently in the background.
 - **Directory Management:** Never extract `.tar.gz` archives directly into the root home folder (`~`). Always create and navigate to a dedicated directory (`mkdir -p /opt/wasabi && cd /opt/wasabi`) to prevent system dependencies from scattering across the server.
-- **Dynamic Downloads:** Because GitHub repository names and version tags fluctuate, use `jq` to parse the official API and dynamically pull the exact browser download link:
-
-  ```bash
-  DOWNLOAD_URL=$(curl -sL https://api.github.com/repos/WalletWasabi/WalletWasabi/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-x64.tar.gz")) | .browser_download_url')
-  ```
 
 ### 5. StartOS Node Integration (The Final Link)
 
 - **Sovereign Block Queries:** By default, Wasabi looks for a local Bitcoin node at `127.0.0.1`. Left unchanged, it will fall back to requesting block filters from public Tor nodes.
-- **The Local Reroute:** Modify the daemon's internal `Config.json` using the command line to permanently point both the `BitcoinP2pEndPoint` and `BitcoinRpcEndPoint` to your sovereign StartOS IP (`192.168.0.12`).
-- **The Result:** Wasabi securely verifies your CoinJoin balances by pulling blocks directly from your own Fulcrum indexer over the private Proxmox virtual network, ensuring zero data leakage to third-party servers.
+- **The Tor Bridge:** Modify the daemon's internal `Config.json` using the command line to point the `BitcoinRpcEndPoint` to your sovereign StartOS `.onion` interface on port `8332` (formatted as standard `http://`).
+- **The Result:** Wasabi securely verifies your CoinJoin balances by pulling blocks directly from your own Knots node over Tor, bypassing the self-signed SSL blocks while ensuring zero data leakage to third-party servers.
+
+### 6. RTL & Boltz Node Liquidity Management
+
+RTL natively integrates Boltz Submarine Swaps to manage liquidity without repeatedly opening and closing channels.
+
+- **Looping Out (Creating Inbound Liquidity):** Use RTL's Swap Out to send funds from your full outbound channel to your Aqua Liquid wallet or cold storage. This converts Lightning sats into Liquid/on-chain sats while opening receiving capacity on your node.
+- **Looping In (Refilling a Drained Channel):** Use RTL's Swap In to send Liquid L-BTC or on-chain BTC to Boltz. Boltz instantly pays a Lightning invoice directly into your depleted node, refilling your outbound spending power.
+- **Privacy (Taproot):** Ensure any Boltz on-chain destination is set to a fresh Taproot address generated by RTL. When opening new channels with these funds, always toggle **Private Channel** to ON to prevent network gossip from linking your Taproot UTXO to your Lightning identity.
