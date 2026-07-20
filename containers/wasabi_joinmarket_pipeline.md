@@ -171,7 +171,8 @@ Lightweight, executable shell scripts to wrap manual commands.
   #!/bin/bash
   METHOD=$1
   PARAMS=${2:-"[]"}
-  curl -s --data-binary "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"$METHOD\", \"params\":$PARAMS}" http://127.0.0.1:37128/<WALLET_NAME> | jq
+  JSON_PAYLOAD=$(jq -n --arg method "$METHOD" --argjson params "$PARAMS" '{jsonrpc: "2.0", id: "1", method: $method, params: $params}')
+  curl -s -H "Content-Type: application/json" --data-binary "$JSON_PAYLOAD" http://127.0.0.1:37128/<WALLET_NAME> | jq
   ```
 
 - **Wasabi Status (RPC) (`check_balance.sh`):**
