@@ -62,7 +62,7 @@ JoinMarket is a suite of Python scripts and does not natively resolve `.onion` d
 ### 1. Install OS-Level Tor Proxies
 
 ```bash
-apt update && apt install tor torsocks -y
+apt-get update && apt-get install tor torsocks -y
 systemctl enable tor
 systemctl start tor
 ```
