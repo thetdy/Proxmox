@@ -70,9 +70,19 @@ To ensure a completely pristine environment free of orphaned files, execute a cl
    # Verify SHA256 checksum
    echo "fd1053949660e20c280fe79e8d6b43e9149694b712247d1ae3ac3b7486616ec0  Wasabi-2.8.0-linux-x64.tar.gz" | sha256sum -c -
 
-   # The Key Import: Pull the official zkSNACKs PGP public key directly into the root Linux keyring.
+   # The Key Import: Pull the official zkSNACKs PGP public key, verify its fingerprint, and import it into the root Linux keyring.
    # (zkSNACKs Key: 6FB3 872B 5D42 292F 5992 0797 8563 4832 8949 861E)
-   wget -qO- https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt | gpg --import
+   wget -qO wasabi.asc https://raw.githubusercontent.com/zkSNACKs/WalletWasabi/master/PGP.txt
+   EXPECTED_FPR="6FB3872B5D42292F59920797856348328949861E"
+   ACTUAL_FPR=$(gpg --show-keys --with-colons wasabi.asc 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')
+   if [ "$ACTUAL_FPR" = "$EXPECTED_FPR" ]; then
+       gpg --import wasabi.asc
+       rm wasabi.asc
+   else
+       echo "CRITICAL: PGP key fingerprint mismatch! Expected $EXPECTED_FPR but got $ACTUAL_FPR" >&2
+       rm wasabi.asc
+       exit 1
+   fi
 
    # The Signature Match & Verification:
    # Run the `gpg --verify` command against the two files to achieve the `Good signature from "zkSNACKs"` output, proving the archive was untampered with.
